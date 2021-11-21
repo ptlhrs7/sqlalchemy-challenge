@@ -9,7 +9,7 @@ from sqlalchemy import create_engine, func
 import flask
 from flask import Flask
 
-engine = create_engine("sqlite:///hawaii.sqlite")
+engine = create_engine("sqlite:///Resources/hawaii.sqlite")
 
 Base = automap_base()
 
