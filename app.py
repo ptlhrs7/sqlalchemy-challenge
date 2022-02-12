@@ -1,79 +1,176 @@
-import pandas as pd
 import numpy as np
+import sqlalchemy
 import datetime as dt
-import sqlalchemy 
-from sqlalchemy.ext.automap import automap_base
+from sqlalchemy.ext.automap import automap_base, name_for_collection_relationship
 from sqlalchemy.orm import Session
 from sqlalchemy import create_engine, func
+from flask import Flask, jsonify
 
-import flask
-from flask import Flask
+##########################################################
+# Database setup
 
+##########################################################
 engine = create_engine("sqlite:///Resources/hawaii.sqlite")
 
+
+# reflect an existing database into a new model
 Base = automap_base()
 
+# reflect an existing database into a new model
+Base = automap_base()
+# reflect the tables
 Base.prepare(engine, reflect=True)
 
+# View all of the classes that automap found
+Base.classes.keys()
+
+# Save references to each table
 Measurement = Base.classes.measurement
 Station = Base.classes.station
-session = Session(engine)
+
+#################################################
+# Flask Setup
+#################################################
 
 app = Flask(__name__)
 
-
-@app.route("/api/v1.0/precipitation")
-
-def precipitation():
-    m_prcp = session.query(Measurement.prcp , Measurement.date).\
-    filter(Measurement.date > '2016-08-23').\
-    order_by(Measurement.date).all()
-    prdict = {date : x for date , x in m_prcp}
-    return jsonify(prdict)
+#################################################
+# Flask Routes
+#################################################
 
 
 @app.route("/")
-def welcome():
-    return (f"welcome page <br/>"
-           
-           f" routes <br/>"
-           
-           f"/api/v1.0/precipitation <br/>"
-           
-           f"/api/v1.0/stations <br/>"
-           
-           f"/api/v1.0/tobs <br/>")
-           
+def home():
+    print("Server received request for 'Home' page...")
+    return (f"Welcome to my 'Home' page!<br/>"
+            f"&emsp;Available Routes:<br/>"
+            f"&emsp;&emsp;1. /api/v1.0/precipitation<br/>"
+            f"&emsp;&emsp;2. /api/v1.0/stations<br/>"
+            f"&emsp;&emsp;3. /api/v1.0/tobs<br/>"
+            f"&emsp;&emsp;4. /api/v1.0/start<br/>"
+            f"&emsp;&emsp;5. /api/v1.0/start/end<br/>")
+
+# Define what to do when a user hits the /api/v1.0/precipitation route
+
+
+@app.route("/api/v1.0/precipitation")
+def precipitation():
+    session = Session(engine)
+
+    MaxDate = session.query(Measurement.date).order_by(
+        Measurement.date.desc()).first()
+    MaxDate = MaxDate[0]
+    MaxDay = int(MaxDate[-2:])
+    MaxYear = int(MaxDate[:4])
+    MaxMonth = int(MaxDate[5:7])
+    previous_year = dt.date(MaxYear, MaxMonth, MaxDay)-dt.timedelta(days=365)
+
+#Query all precipitation data.
+    prec_query = session.query(Measurement.date, Measurement.prcp).filter(
+        Measurement.date >= previous_year).order_by(Measurement.date).all()
+
+    session.close()
+
+ # Create a dictionary from the row data and append to a list of all_precipitation
+    all_precipitation = []
+    for date, prcp in prec_query:
+        prec_dict = {}
+        prec_dict[date] = prcp
+        all_precipitation.append(prec_dict)
+
+    app.config['JSONIFY_PRETTYPRINT_REGULAR'] = False
+    return jsonify(all_precipitation)
+
+# Define what to do when a user hits the /api/v1.0/stations route
+
 
 @app.route("/api/v1.0/stations")
+def stations():
 
-def station():
-    result = session.query(Station.station).all()
-    st_list = list(np.ravel(result))
-    return jsonify (st_list)
+    session = Session(engine)
 
+    station_query = session.query(Station.id, Station.station, Station.name).\
+        all()
+
+    session.close()
+
+# Create a dictionary from the row data and append to a list of all_precipitation
+    all_stations = []
+    for id, station, name in station_query:
+        station_dict = {}
+        station_dict[id] = [station, name]
+        all_stations.append(station_dict)
+    app.config['JSONIFY_PRETTYPRINT_REGULAR'] = False
+    return jsonify(all_stations)
+
+#  Define what to do when a user hits the api/v1.0/tobs route
 
 
 @app.route("/api/v1.0/tobs")
-
 def tobs():
-    tobss = session.query(Measurement.tobs).\
-            filter(Measurement.station == 'USC00519281' ).\
-            filter(Measurement.date >= '2017,8,23').all()
-    tobs_list = list(np.ravel(tobss))
-    return jsonify (tobs_list)
+    session = Session(engine)
+
+    MaxDate = session.query(Measurement.date).order_by(
+        Measurement.date.desc()).first()
+    MaxDate = MaxDate[0]
+    MaxDay = int(MaxDate[-2:])
+    MaxYear = int(MaxDate[:4])
+    MaxMonth = int(MaxDate[5:7])
+    previous_year = dt.date(MaxYear, MaxMonth, MaxDay)-dt.timedelta(days=365)
+
+    tobs_query = session.query(Station.name, Measurement.date, Measurement.tobs).\
+        filter(Station.station == Measurement.station, Station.id ==
+               '7', Measurement.date >= previous_year).all()
+
+    session.close()
+
+# Create a dictionary from the row data and append to a list of all_precipitation
+    all_tobs = []
+    for date, name, tobs in tobs_query:
+        tobs_dict = {}
+        tobs_dict[name] = [date, tobs]
+        all_tobs.append(tobs_dict)
+    app.config['JSONIFY_PRETTYPRINT_REGULAR'] = False
+    return jsonify(all_tobs)
+
+# Define what to do when a user hits the /api/v1.0/<start> route
 
 
+@app.route("/api/v1.0/<start>")
+def startdate(start=""):
 
-@app.route ("/api/v1.0/<start>/<end>")
+    session = Session(engine)
 
-def temps(start,end):
-    findings = session.query(Measurement).filter(Measurement.date>= start).filter(Measurement.date<=end)
-    found =[] 
-    for row in findings:
-        found.append(row.tobs) 
-    return (jsonify ({"tempmin": min(found),"tempmax": max(found),"tempavg":np.mean}))
-           
+    selection = [func.min(Measurement.tobs), func.avg(
+        Measurement.tobs), func.max(Measurement.tobs)]
+    start = dt.datetime.strptime(start, "%m%d%Y").date()
+    results = session.query(*selection).filter(Measurement.date >= start).all()
+    app.config['JSONIFY_PRETTYPRINT_REGULAR'] = False
+    return jsonify(list(np.ravel(results)))
+
+    session.close()
+
+#  Define what to do when a user hits the /api/v1.0/<start>/<end> route
+
+
+@app.route("/api/v1.0/<start>/<end>")
+def start_and_end(start="", end=""):
+
+    session = Session(engine)
+
+    selection = [func.min(Measurement.tobs), func.avg(
+        Measurement.tobs), func.max(Measurement.tobs)]
+    start = dt.datetime.strptime(start, "%m%d%Y")
+    end = dt.datetime.strptime(end, "%m%d%Y")
+    results = session.query(*selection).filter(Measurement.date >=
+                                               start).filter(Measurement.date <= end).all()
+    app.config['JSONIFY_PRETTYPRINT_REGULAR'] = False
+    return jsonify(list(np.ravel(results)))
+
+    session.close()
+
 
 if __name__ == "__main__":
     app.run(debug=True)
+
+# Reference code used from Dr. A's Documentation
